@@ -8,7 +8,7 @@ The markdown document contains all the code required to reproduce the main figur
 
 To run the markdown document you will need **R4.0**, and the following libraries:
 
-    Seurat_3.1.5
+    SingleCellExperiment_1.10.1
     ggplot2_3.3.2
     dplyr_0.8.5
     data.table_1.21.8

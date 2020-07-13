@@ -17,6 +17,12 @@ To run the markdown document you will need **R4.0**, and the following libraries
     tidyr_1.1.0
     magrittr_1.5
 
-The markdown document contains a section which installs the required libraries.
+
+The MyoExplorer_Figures_Code.rmd markdown document contains the code to reproduce all computational figures.
+It contains a section which installs the required libraries, and downloads the data into a prespecified folder.
+
+Before running the code please specify the **params: input_file_location** parameter, in the header
+of the .rmd document. Input files will be downloaded into the specified folder.
+
 
 

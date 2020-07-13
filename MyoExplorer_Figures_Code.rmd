@@ -6,6 +6,10 @@ output:
   html_document:
   toc: true
 toc_float: true
+
+params:
+  input_file_location: 
+
 ---
   
   
@@ -19,3 +23,324 @@ knitr::opts_chunk$set(
   fig.height = 3
 )
 ```
+
+```{r, echo = FALSE, include = FALSE }
+# library dependencies
+packages = c('dplyr','stringr','ggplot2','ComplexHeatmap','data.table','ggrepel','SingleCellExperiment')
+
+# checks whether the packages are installed, if not then installs them
+ip = as.data.frame(installed.packages())
+ip = setdiff(packages, ip$Package)
+if(length(ip) > 0){
+    for(i in ip){
+        message(paste('Installing package:', i))
+        install.packages(i)
+    }
+}
+
+# loads the packages
+suppressPackageStartupMessages({
+    invisible(lapply(packages, function(x)library(x, character.only = TRUE)))
+})
+```
+
+
+```{r, echo = FALSE, include = FALSE}
+# Parameters
+theme = theme(
+      axis.title.x     = element_text(size=16),
+      axis.title.y     = element_text(size=16),
+      axis.text.x      = element_text(size=16),
+      axis.text.y      = element_text(size=16),
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      panel.background = element_blank(),
+      axis.line        = element_line(colour = "black"),
+      plot.title       = element_text(hjust = 0.5)
+    )
+
+```
+
+
+
+```{r}
+if(is.null(params$input_file_location))
+  stop('Please specify the download location for the SingleCellExperiment objects')
+
+# Downloads the data into input file location
+remote_path = 'http://bimsbstatic.mdc-berlin.de/akalin/MyoExplorer/'
+datasets = c(
+  'Myocyte_d0-7-14.sce.RDS',
+  'Myocyte_MDX.sce.RDS',
+  'Myocyte_Spindle.sce.RDS'
+)
+invisible(lapply(datasets[1], function(name){
+  if(!file.exists(file.path(params$input_file_location, name))){
+    download.file(
+      url      = file.path(remote_path, name), 
+      destfile = file.path(params$input_file_location, name),
+      method   = 'auto'
+    )
+  }
+}))
+```
+
+```{r, echo = FALSE, include = FALSE}
+source(file.path('./','Functions.R'))
+```
+
+```{r, echo = FALSE, include = FALSE}
+# Data Input
+
+# annotation
+annot = readRDS('annot.RDS')
+
+# regenerating fiber
+reg_sce = readRDS(file.path(params$input_file_location,'Myocyte_d0-7-14.sce.RDS'))
+
+# regenerating fiber - diff genes
+reg_diff_genes = readRDS('d0-7-14_DiffGenes.RDS')
+
+
+# mdx
+mdx_sce = readRDS(file.path(params$input_file_location,'Myocyte_MDX.sce.RDS'))
+
+# mdx - regenerating scrore
+mdx_reg_score = readRDS('MDX-Reg_Time_Score.RDS')
+
+# spindle
+spd_sce = readRDS(file.path(params$input_file_location,'Myocyte_Spindle.sce.RDS'))
+```
+
+# Figure 1
+
+### A1 : UMAP Clustering
+
+```{r, fig.width=5, fig.height = 3}
+plot_tSNE_Annot(reg_sce, 'clusters',  proj_name ='UMAP')
+```
+
+
+### A2 : UMAP Timepoint
+
+
+```{r, fig.width=5, fig.height = 4}
+plot_tSNE_Annot(reg_sce, 'time',  proj_name ='UMAP')
+```
+
+### B :  UMAP Muscle Markers
+
+```{r, fig.width=3, fig.height = 2}
+gene_names = c('Ttn','Myh1','Myh2','Myh4')
+for(gene_name in gene_names)
+  plot_tSNE_Gene(reg_sce, gene_name,  proj_name ='UMAP')
+```
+
+### C : Cluster Heatmap
+
+
+```{r, fig.width = 4, fig.height = 5}
+cluster_order = c('Gssos2','NMJ','MTJ-A','MTJ-B','Suz12+','Rian','Bcl2+')
+sce_small = reg_sce[,!reg_sce$clusters %in% c('Bulk','Perimysium')]
+
+diff_genes = reg_diff_genes %>%
+    ungroup() %>%
+    filter(cluster != 'Bulk') %>%
+    filter(cluster != 'Perimysium') %>%
+    mutate(cluster = factor(cluster, levels=cluster_order)) %>%
+    arrange(cluster)
+feat = unique(diff_genes$gene_name)
+expr = as.matrix(assays(sce_small)[['logcounts']])[feat,]
+
+col = circlize::colorRamp2(
+  colors = c('magenta','black','yellow'),
+  breaks = c(-5, 0, 5))
+
+dd = colData(sce_small) %>%
+  as.data.frame() %>%
+  dplyr::select(time, cell_id, clusters) %>%
+  mutate(time = str_replace(time, '_.+','')) %>%
+  mutate(clusters = factor(clusters, levels=cluster_order)) %>%
+  magrittr::set_rownames(.$cell_id)
+dd$cell_id = NULL
+
+col_meta = list(
+  time     = setNames(ggplotColors(length(unique(dd$time))), unique(dd$time)),
+  clusters = setNames(ggplotColors(length(unique(dd$clusters))+1)[-1], unique(dd$clusters))
+)
+cind = order(dd$clusters)
+ca = HeatmapAnnotation(df = dd[cind,,drop=FALSE], which='column', col=col_meta, name='annot')
+
+h1 = Heatmap(expr[,cind], show_row_names=FALSE, show_column_names=FALSE,
+            cluster_columns = FALSE, cluster_rows=FALSE,
+            top_annotation = ca,
+            show_row_dend = FALSE,
+            col = col)
+
+draw(h1)
+```
+
+### D : NMJ Violin
+
+```{r, fig.width=5, fig.height = 3}
+gene_names = c('Chrna1','Prkar1a','Ache','Chrne','Vav3','Ablim2','Phldb2','Ufsp1')
+for(gene_name in gene_names)
+  plot_Violin_Gene(reg_sce, gene_name, cell_type = 'clusters')
+```
+
+# Figure 2
+
+### A : MTJ-A Vs MTJ-B Violin
+
+```{r, fig.width=5, fig.height = 3}
+gene_names = c('Itgb1','Pdzd2','Col24a1','Col22a1','Tigd4','Col1a2','Col6a1','Col6a3','Pdgfrb','Ebf1')
+for(gene_name in gene_names)
+  plot_Violin_Gene(reg_sce, gene_name, cell_type = 'clusters')
+```
+
+# Figure 3
+
+### A : Novel Subtypes Violin
+
+```{r, fig.width=5, fig.height = 3}
+gene_names = c('Rian','Mirg','Gssos2','Rn7s6','Tmem170','Suz12','Halr1','Bcl2','Osbpl3','Nr2f1','Muc13','Gucy2e')
+for(gene_name in gene_names)
+  plot_Violin_Gene(reg_sce, gene_name, cell_type = 'clusters')
+```
+
+### E1 : Reclustering UMAP
+
+```{r, fig.width=4, fig.height = 2}
+plot_tSNE_Annot(reg_sce, 'subclustering',  proj_name ='UMAP_SUB')
+```
+
+### E2 : Perymisium Heatmap
+
+```{r, fig.width = 4, fig.height = 3}
+gene_names = c('Muc13','Gucy2e','Iqce','RP23-79E5.5','Zfp956','Phc1','Ccnd3')
+clusters = reg_sce$subclustering
+
+mat = assays(reg_sce)[['logcounts']][gene_names,]
+
+mat_stat = lapply(c('Bulk','Perimysium'), function(cluster){
+  data.frame(
+    gene_name = gene_names, 
+    mean      = rowMeans(mat[, which(clusters == cluster)]),
+    cluster   = cluster
+  )
+})
+mat_stat = do.call(rbind, mat_stat) %>%
+  group_by(cluster) %>%
+  ungroup() %>%
+  mutate(cluster = factor(cluster, levels=c('Bulk','Perimysium'))) %>%
+  mutate(gene_name = factor(gene_name, levels=rev(gene_names)))
+
+mat_stat %>%
+  ggplot(aes(cluster, gene_name, fill=mean)) +
+  geom_tile() +
+  scale_fill_gradient(low = 'black', high = 'yellow') +
+  theme +
+  theme(axis.text.x = element_text(angle = 45, hjust=1)) +
+  xlab('Cluster') +
+  ylab('Gene')
+```
+
+
+# Figure 4
+
+### A: Mdx UMAP 
+
+```{r, fig.width = 3.5, fig.height = 2}
+plot_tSNE_Annot(mdx_sce, 'clusters',  proj_name ='UMAP')
+```
+
+### B: Time signature Mdx
+
+```{r}
+col =  circlize::colorRamp2(
+    colors = c('black','yellow'),
+    breaks = c( 0, 1)
+)
+mat = as.matrix(mdx_reg_score)
+colnames(mat) = str_replace(colnames(mat),'_25','')
+colnames(mat) = str_replace(colnames(mat),'auc_','')
+h = Heatmap(mat, show_row_names=FALSE, 
+            cluster_columns = FALSE, col=col, show_row_dend = FALSE)
+draw(h)
+```
+
+
+### C1: Genes Violin
+
+```{r, fig.width=5, fig.height = 3}
+gene_names = c('Gpt2','Gm10717','Gm10801','Suz12','Muc13','Flnc','Xirp1')
+for(gene_name in gene_names)
+  plot_Violin_Gene(mdx_sce, gene_name, cell_type = 'clusters')
+```
+
+### C2: nUMI per cluster
+
+```{r, fig.width = 5, fig.height = 3}
+colData(mdx_sce)  %>%
+  as.data.frame() %>%
+  ggplot(aes(clusters, nCount_RNA)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(position=position_jitter(0.2), size=0.5) +
+  theme +
+  xlab('Cluster') +
+  ylab('nUMI') +
+  geom_hline(yintercept = 500, linetype=2) +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
+```
+
+
+# Figure 5
+
+### C: Spindle UMAP
+
+```{r, fig.width=4, fig.height = 2}
+plot_tSNE_Annot(spd_sce, 'clusters',  proj_name ='UMAP')
+```
+
+### D: Genes dotplot
+
+```{r, fig.width = 10, fig.height = 4}
+gene_names = c('Agbl2','Lrtm1','Chrne','Ache','Ufsp1','Hmcn2','Col3a1','Ebf1','Col6a3','Col6a1','Abca8a','Myh6','Myh7b','Spocd1','Padi2','Tnnt1','Myh13','Igfn1','Crhr2','Mettl11b','Mylk2','Hmgb1-ps8','Synm','Calcrl','Etv4','Erf','Pdgfa','Fbxw7','Frmd4b','Cpne7','Ctnnbip1','Daam2','Sim1','Myom1','Fam13a','Piezo2')
+
+mat = as.matrix(assays(spd_sce)[['logcounts']][gene_names,])
+clusters = spd_sce$clusters
+
+mat_stat = lapply(unique(clusters), function(cluster){
+  data.frame(
+    gene_name = gene_names, 
+    mean      = rowMeans(mat[, clusters == cluster]),
+    pct.exp   = rowSums(mat[, clusters == cluster] > 0)/length(cluster),
+    cluster   = cluster
+  )
+})
+mat_stat = do.call(rbind, mat_stat) %>%
+  group_by(cluster) %>%
+  mutate(avg.exp.scaled = scale(mean)) %>%
+  ungroup() %>%
+  mutate(cluster = factor(cluster, levels=rev(c('NMJ','MTJ','Bag','Chain1','Chain2','Sens')))) %>%
+  mutate(gene_name = factor(gene_name, levels=gene_names))
+
+mat_stat %>%
+  ggplot(
+     aes_string(
+       x     = 'gene_name', 
+       y     = 'cluster',
+       size  = "pct.exp", 
+       color = "avg.exp.scaled"
+      )) + 
+    geom_point() +
+    theme +
+    guides(size = guide_legend(title = "Percent Expressed")) + 
+      labs(
+        x   = "Features", 
+        y   = 'Cluster'
+      ) + 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  scale_color_gradient2()
+```
+
